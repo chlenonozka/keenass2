@@ -1,0 +1,4 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+a { color: #0d63e4; text-decoration: none; }
+a:hover { text-decoration: underline; }

@@ -1,0 +1,29 @@
+.loader, .loader-full {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+}
+
+.loader-full {
+  min-height: 60vh;
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid rgba(0,0,0,.2);
+  border-top-color: rgba(0,0,0,.6);
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+.spinner.inline {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
