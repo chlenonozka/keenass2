@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
 import { RootStoreProvider } from './stores/root.store'
 import App from './App'
-import './styles/global.css'
 
 const theme = createTheme({ palette: { mode: 'light' } })
 

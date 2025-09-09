@@ -13,6 +13,12 @@ export class RootStore {
     this.auth = new AuthStore(this)
     this.users = new UsersStore()
     this.posts = new PostsStore(this.auth)
+    
+    this.setupReactions()
+    makeAutoObservable(this)
+  }
+
+  private setupReactions() {
     reaction(
       () => this.auth.user?.avatarUrl,
       (newAvatarUrl, oldAvatarUrl) => {
@@ -21,20 +27,36 @@ export class RootStore {
         }
       }
     )
-
-    makeAutoObservable(this)
+    reaction(
+      () => this.auth.isAuthenticated,
+      (isAuthenticated) => {
+        if (!isAuthenticated) {
+          this.posts.posts = []
+          this.users.list = []
+        }
+      }
+    )
   }
 }
 
 const RootStoreContext = createContext<RootStore | null>(null)
-const root = new RootStore()
 
-export const RootStoreProvider: React.FC<React.PropsWithChildren> = ({ children }) => (
-  <RootStoreContext.Provider value={root}>{children}</RootStoreContext.Provider>
-)
+export const RootStoreProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const [rootStore] = React.useState(() => new RootStore())
+  
+  return (
+    <RootStoreContext.Provider value={rootStore}>
+      {children}
+    </RootStoreContext.Provider>
+  )
+}
 
 export const useRootStore = () => {
   const ctx = useContext(RootStoreContext)
   if (!ctx) throw new Error('RootStoreProvider is missing')
   return ctx
 }
+
+export const useAuthStore = () => useRootStore().auth
+export const useUsersStore = () => useRootStore().users
+export const usePostsStore = () => useRootStore().posts

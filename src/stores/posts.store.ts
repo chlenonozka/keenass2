@@ -1,11 +1,12 @@
 import { makeAutoObservable, runInAction } from 'mobx'
-import http from '../api/http'
+import { PostService } from '../services/post.service'
 import type { ID, Post, Comment, CreatePostDTO } from '../types'
 import type { AuthStore } from './auth.store'
-import { DEFAULT_AVATAR } from 'constants/ui'
+import { DEFAULT_AVATAR } from '../constants/ui'
 
 export class PostsStore {
   private auth: AuthStore
+  private postService: PostService
 
   posts: Post[] = []
   commentsByPost: Record<ID, Comment[]> = {}
@@ -21,6 +22,7 @@ export class PostsStore {
   constructor(auth: AuthStore) {
     makeAutoObservable(this)
     this.auth = auth
+    this.postService = new PostService()
   }
 
   isPostProcessing(id: ID) { return this.processingPosts.has(id) }
@@ -38,31 +40,16 @@ export class PostsStore {
   }
 
   async uploadImage(file: File): Promise<{ url: string; name: string }> {
-    const fd = new FormData()
-    fd.append('file', file)
-
-    const { data } = await http.post<any>('/uploads', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-
-    const item = Array.isArray(data) ? data[0] : (data?.data ?? data)
-    const url: string = item?.url || item?.path || item?.src
-    if (!url) throw new Error('Сервер не вернул ссылку на файл')
-
-    const clean = String(url).split('?')[0].split('#')[0]
-    const name = clean.substring(clean.lastIndexOf('/') + 1)
-
-    return { url, name }
+    return this.postService.uploadFile(file)
   }
 
   async fetchPosts() {
     this.isLoadingPosts = true
     this.errorPosts = null
     try {
-      const { data } = await http.get<Post[]>('/posts')
+      const data = await this.postService.getPosts()
       data.sort((a, b) => (b.createdAt?.localeCompare(a.createdAt || '') || 0))
       runInAction(() => (this.posts = data))
-
     } catch (e: any) {
       runInAction(() => (this.errorPosts = e?.response?.data?.message || 'Не удалось загрузить посты'))
     } finally {
@@ -72,6 +59,7 @@ export class PostsStore {
 
   async createPost(input: CreatePostDTO) {
     if (!this.auth.user) throw new Error('Требуется вход')
+    
     const payload = {
       description: input.description,
       imageUrl: input.imageUrl,
@@ -81,17 +69,17 @@ export class PostsStore {
       authorAvatarUrl: this.auth.user.avatarUrl,
       createdAt: new Date().toISOString()
     }
-    const { data } = await http.post<Post>('/posts', payload)
+    
+    const data = await this.postService.createPost(payload)
     runInAction(() => {
       this.posts.unshift(data)
-
       this.previewCommentsByPost[data.id] = []
       this.commentsCountByPost[data.id] = 0
     })
   }
 
   async refreshCommentsPreview(postId: ID) {
-    const { data } = await http.get<Comment[]>('/comments', { params: { post_id: postId } })
+    const data = await this.postService.getComments(postId)
     data.sort((a, b) => (a.createdAt?.localeCompare(b.createdAt || '') || 0))
     const first3 = data.slice(0, 3)
     runInAction(() => {
@@ -110,39 +98,21 @@ export class PostsStore {
     this.setPostProcessing(postId, true);
     try {
       try {
-        const { data } = await http.get<Comment[]>('/comments', { params: { post_id: postId } });
-        await Promise.allSettled(data.map(c => http.delete(`/comments/${c.id}`)));
+        const comments = await this.postService.getComments(postId);
+        await Promise.allSettled(comments.map(c => this.postService.deleteComment(c.id)));
       } catch {}
 
       const post = this.posts.find(p => p.id === postId);
 
       if (post?.imageUrl) {
         try {
-          console.log('URL изображения поста:', post.imageUrl);
-
-          const { data } = await http.get<any[]>('/uploads', {
-            params: { url: post.imageUrl } 
-          });
-
-          console.log('Ответ от сервера:', data);
-
-          const imageId = data.length > 0 ? data[0].id : undefined;
-
-          console.log('ID изображения из загрузок:', imageId);
-
-          if (imageId) {
-            await http.delete(`/uploads/${imageId}`);
-            console.log('Изображение успешно удалено');
-          } else {
-            console.error('Не удалось найти ID изображения');
-          }
+          await this.postService.deleteUploadedFile(post.imageUrl);
         } catch (error) {
           console.error('Ошибка при удалении изображения поста:', error);
         }
       }
 
-      await http.delete<void>(`/posts/${postId}`);
-      console.log('Пост успешно удален');
+      await this.postService.deletePost(postId);
 
       runInAction(() => {
         this.posts = this.posts.filter(p => p.id !== postId);
@@ -156,17 +126,18 @@ export class PostsStore {
   }
 
   async fetchComments(postId: ID) {
-    const { data } = await http.get<Comment[]>('/comments', { params: { post_id: postId } })
+    const data = await this.postService.getComments(postId)
     data.sort((a, b) => (a.createdAt?.localeCompare(b.createdAt || '') || 0))
     runInAction(() => {
       this.commentsByPost[postId] = data
       this.commentsCountByPost[postId] = data.length
-      this.previewCommentsByPost[postId] = data.slice(0, 3) 
+      this.previewCommentsByPost[postId] = data.slice(0, 3)
     })
   }
 
   async addComment(postId: ID, text: string) {
     if (!this.auth.user) throw new Error('Требуется вход')
+    
     const payload = {
       post_id: postId,
       text,
@@ -175,7 +146,8 @@ export class PostsStore {
       authorAvatarUrl: this.auth.user.avatarUrl,
       createdAt: new Date().toISOString()
     }
-    const { data } = await http.post<Comment>('/comments', payload)
+    
+    const data = await this.postService.createComment(payload)
     runInAction(() => {
       if (this.commentsByPost[postId]) {
         const list = this.commentsByPost[postId]
@@ -204,8 +176,7 @@ export class PostsStore {
 
   async fetchUserAvatar(userId: ID): Promise<string> {
     try {
-      const { data } = await http.get<{ avatarUrl: string }>(`/users/${userId}/avatar`)
-      return data.avatarUrl || DEFAULT_AVATAR
+      return await this.postService.getUserAvatar(userId)
     } catch (e) {
       return DEFAULT_AVATAR
     }
@@ -214,7 +185,7 @@ export class PostsStore {
   async hardDeleteComment(postId: ID, commentId: ID) {
     this.setCommentProcessing(commentId, true)
     try {
-      await http.delete<void>(`/comments/${commentId}`)
+      await this.postService.deleteComment(commentId)
       runInAction(() => {
         if (this.commentsByPost[postId]) {
           this.commentsByPost[postId] =
@@ -237,7 +208,7 @@ export class PostsStore {
       const userPosts = this.posts.filter(p => p.authorId === userId);
       await Promise.allSettled(
         userPosts.map(post => 
-          http.patch(`/posts/${post.id}`, { authorAvatarUrl: newAvatarUrl })
+          this.postService.updatePost(post.id, { authorAvatarUrl: newAvatarUrl })
         )
       );
 
@@ -248,7 +219,7 @@ export class PostsStore {
       
       await Promise.allSettled(
         userComments.map(comment =>
-          http.patch(`/comments/${comment.id}`, { authorAvatarUrl: newAvatarUrl })
+          this.postService.updateComment(comment.id, { authorAvatarUrl: newAvatarUrl })
         )
       );
     } catch (error) {
@@ -291,14 +262,9 @@ export class PostsStore {
   async updateAvatarOnServer(userId: ID, newAvatarUrl: string) {
     try {
       const payload = { avatarUrl: newAvatarUrl };
-      const response = await http.patch(`/users/${userId}`, payload);
-
-      if (response.status === 200) {
-        await this.updateAllUserAvatarsOnServer(userId, newAvatarUrl);
-        await this.updateAvatarInPostsAndComments(userId, newAvatarUrl);
-      } else {
-        throw new Error('Ошибка при обновлении аватарки на сервере');
-      }
+      await this.postService.updateUser(userId, payload);
+      await this.updateAllUserAvatarsOnServer(userId, newAvatarUrl);
+      await this.updateAvatarInPostsAndComments(userId, newAvatarUrl);
     } catch (error) {
       console.error('Ошибка при обновлении аватарки на сервере:', error);
     }
@@ -328,7 +294,7 @@ export class PostsStore {
         );
       });
 
-      this.posts = [...this.posts];  
+      this.posts = [...this.posts];
     });
   }
 }

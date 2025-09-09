@@ -1,7 +1,8 @@
 import { makeAutoObservable, runInAction } from 'mobx'
-import http from '../api/http'
-import type { CredentialsDTO, RegisterDTO, User } from '../types'
+import { AuthService } from '../services/auth.service'
+import { UploadService } from '../services/upload.service'
 import type { RootStore } from './root.store'
+import type { User, CredentialsDTO, RegisterDTO } from '../types'
 
 export class AuthStore {
   user: User | null = null
@@ -10,15 +11,25 @@ export class AuthStore {
   initializing = true
   error: string | null = null
 
+  private authService: AuthService
+  private uploadService: UploadService
+
   constructor(private rootStore: RootStore) {
+    this.authService = new AuthService()
+    this.uploadService = new UploadService()
     makeAutoObservable(this)
     this.hydrate()
   }
 
   get isAuthenticated() { return !!this.token && !!this.user }
-  get isAdmin() {
-    const r = this.user?.role
-    return typeof r === 'string' && r.toLowerCase().trim() === 'admin'
+  
+  get isAdmin(): boolean {
+    return this.user?.role === 'admin'
+  }
+
+  get canModerate(): boolean {
+    const role = this.user?.role
+    return role === 'admin' || role === 'moderator'
   }
 
   hydrate() {
@@ -37,14 +48,7 @@ export class AuthStore {
 
     this.initializing = false
     if (this.token && !this.user) {
-      this.fetchMe().then(u => {
-        if (u) {
-          runInAction(() => {
-            this.user = u
-            localStorage.setItem('user', JSON.stringify(u))
-          })
-        }
-      }).catch(() => {})
+      this.fetchMe().catch(() => {})
     }
   }
 
@@ -52,27 +56,27 @@ export class AuthStore {
     this.isLoading = true
     this.error = null
     try {
-      const { data } = await http.post<any>('/auth', dto)
-      const token: string | undefined = data?.token ?? data?.accessToken ?? data?.jwt
-      if (!token) throw new Error('Сервер не вернул токен')
-
+      const { token, user } = await this.authService.login(dto)
+      
       runInAction(() => {
         this.token = token
         localStorage.setItem('token', token)
       })
       
-      let user: User | null | undefined = data?.user ?? data?.profile ?? null
-      if (!user) {
-        user = await this.fetchMe()
+      let userData: User | null = user || null 
+      if (!userData) {
+        const fetchedUser = await this.authService.fetchMe()
+        userData = fetchedUser || null 
       }
-      if (user?.isBlocked) {
+      
+      if (userData?.isBlocked) {
         this.logout()
         throw new Error('Пользователь заблокирован')
       }
 
       runInAction(() => {
-        this.user = user ?? null
-        if (user) localStorage.setItem('user', JSON.stringify(user))
+        this.user = userData 
+        if (userData) localStorage.setItem('user', JSON.stringify(userData))
         else localStorage.removeItem('user')
       })
     } catch (e: any) {
@@ -84,15 +88,17 @@ export class AuthStore {
       runInAction(() => (this.isLoading = false))
     }
   }
-
   async fetchMe(): Promise<User | null> {
     try {
-      const { data } = await http.get<any>('/auth_me')
-      const user: User = data?.user ?? data
-      return (user && user.id != null) ? user : null
+      const user = await this.authService.fetchMe()
+      runInAction(() => {
+        this.user = user || null 
+        if (user) localStorage.setItem('user', JSON.stringify(user))
+        else localStorage.removeItem('user')
+      })
+      return user || null
     } catch (e: any) {
-      const code = e?.response?.status
-      if (code === 401) {
+      if (e.message === 'Unauthorized') {
         this.logout()
       }
       return null
@@ -103,12 +109,12 @@ export class AuthStore {
     this.isLoading = true
     this.error = null
     try {
-      const { data } = await http.post<{ token: string; user: User }>('/register', dto)
+      const { token, user } = await this.authService.register(dto)
       runInAction(() => {
-        this.token = data.token
-        this.user = data.user
-        localStorage.setItem('token', data.token)
-        localStorage.setItem('user', JSON.stringify(data.user))
+        this.token = token
+        this.user = user
+        localStorage.setItem('token', token)
+        localStorage.setItem('user', JSON.stringify(user))
       })
     } catch (e: any) {
       runInAction(() => {
@@ -122,79 +128,35 @@ export class AuthStore {
 
   async updateMe(update: Partial<Pick<User, 'name' | 'avatarUrl' | 'avatarName'>>) {
     if (!this.user) throw new Error('Нет пользователя')
-    const id = this.user.id
-    const payload = { ...update }
-    const { data } = await http.patch<User>(`/users/${id}`, payload)
+    
+    const updatedUser = await this.authService.updateUser(this.user.id, update)
     runInAction(() => {
-      this.user = data  
-      localStorage.setItem('user', JSON.stringify(data))  
+      this.user = updatedUser
+      localStorage.setItem('user', JSON.stringify(updatedUser))
     })
-    return data
+    return updatedUser
   }
 
   async uploadAvatar(file: File): Promise<{ url: string; name: string }> {
-    const fd = new FormData()
-    fd.append('file', file)
-    const { data } = await http.post<any>('/uploads', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    const item = Array.isArray(data) ? data[0] : (data?.data ?? data)
-    const url: string = item?.url || item?.path || item?.src
-    if (!url) throw new Error('Сервер не вернул ссылку на файл')
-    const clean = String(url).split('?')[0].split('#')[0]
-    const name = clean.substring(clean.lastIndexOf('/') + 1)
-    return { url, name }
+    return this.uploadService.uploadFile(file)
   }
 
   async changeAvatar(file: File): Promise<{ url: string; name: string }> {
-    const { url, name } = await this.uploadAvatar(file) 
-    await this.updateMe({ avatarUrl: url, avatarName: name })  
+    const { url, name } = await this.uploadService.uploadFile(file)
+    await this.updateMe({ avatarUrl: url, avatarName: name })
     return { url, name }
   }
   
   async removeAvatar() {
-    if (!this.user) return;
-
-    const avatarUrl = this.user.avatarUrl;
-
-    if (!avatarUrl) {
-      console.error('Не найден аватар для удаления');
-      return;
-    }
-
-    console.log('URL аватара пользователя:', avatarUrl);
+    if (!this.user?.avatarUrl) return
 
     try {
-      console.log('Отправляем запрос на сервер с параметром:', { url: avatarUrl });
-
-      const { data } = await http.get<any[]>('/uploads', {
-        params: { url: avatarUrl } 
-      });
-
-      console.log('Ответ от сервера:', data);
-
-      const imageId = data.length > 0 ? data[0].id : undefined;
-
-      console.log('URL, полученный от загрузок:', avatarUrl);
-      console.log('ID изображения из загрузок:', imageId);
-
-      if (imageId) {
-        await http.delete(`/uploads/${imageId}`);
-        console.log('Аватар успешно удален');
-      } else {
-        console.error('Не удалось найти ID изображения');
-      }
+      await this.uploadService.deleteFile(this.user.avatarUrl)
     } catch (error) {
-      console.error('Ошибка при удалении аватара:', error);
+      console.error('Ошибка при удалении аватара:', error)
     }
 
-    await this.updateMe({ avatarUrl: '', avatarName: '' });
-  }
-
-  get canModerate() {
-    const r = this.user?.role
-    const role = typeof r === 'string' ? r.toLowerCase().trim() : ''
-    return role === 'admin' || role === 'moderator'
+    await this.updateMe({ avatarUrl: '', avatarName: '' })
   }
 
   logout() {

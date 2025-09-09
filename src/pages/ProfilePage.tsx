@@ -2,9 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { observer } from 'mobx-react-lite'
 import { useRootStore } from '../stores/root.store'
 import {
-  Alert, Avatar, Box, Button, Paper, Stack, TextField, Typography
+  Alert, Avatar, Box, Button, Paper, Stack, TextField, Typography, Skeleton
 } from '@mui/material'
-import Loader from '../components/loader/Loader'
 import { DEFAULT_AVATAR } from '../constants/ui'
 
 type ProfileForm = {
@@ -17,7 +16,17 @@ const ProfilePage = observer(() => {
   const [saving, setSaving] = useState(false)
   const [savedOk, setSavedOk] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSkeleton, setShowSkeleton] = useState(true)
   const fileRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    // Задержка для показа скелетона на 300ms
+    const timer = setTimeout(() => {
+      setShowSkeleton(false)
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [])
 
   useEffect(() => {
     if (auth.user) {
@@ -59,6 +68,29 @@ const ProfilePage = observer(() => {
     }
   };
 
+  if (showSkeleton) {
+    return (
+      <Paper sx={{ p: 3 }}>
+        <Skeleton variant="text" width="40%" height={40} sx={{ mb: 2 }} />
+        
+        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+          <Skeleton variant="circular" width={96} height={96} />
+          <Stack direction="row" spacing={1}>
+            <Skeleton variant="rounded" width={120} height={36} />
+            <Skeleton variant="rounded" width={80} height={36} />
+          </Stack>
+        </Stack>
+
+        <Stack spacing={2} maxWidth={480}>
+          <Skeleton variant="rounded" width="100%" height={56} />
+          <Skeleton variant="rounded" width="100%" height={56} />
+          <Skeleton variant="rounded" width={80} height={36} />
+        </Stack>
+
+        <Skeleton variant="text" width="30%" height={20} sx={{ mt: 3 }} />
+      </Paper>
+    )
+  }
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -108,7 +140,7 @@ const ProfilePage = observer(() => {
 
           <Stack direction="row" spacing={1}>
             <Button type="submit" variant="contained" disabled={saving}>
-              {saving ? <Loader inline /> : 'Сохранить'}
+              {saving ? 'Сохранение...' : 'Сохранить'}
             </Button>
           </Stack>
 

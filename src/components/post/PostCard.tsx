@@ -4,7 +4,7 @@ import { useRootStore } from '../../stores/root.store'
 import { DEFAULT_AVATAR } from '../../constants/ui'
 import {
   Alert, Avatar, Box, Button, Card, CardContent, CardHeader,
-  Divider, IconButton, Stack, TextField, Typography, Tooltip
+  Divider, IconButton, Stack, TextField, Typography, Tooltip, Skeleton
 } from '@mui/material'
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever'
 import type { Post } from '../../types'
@@ -23,6 +23,7 @@ const PostCard = observer(({ post }: { post: Post }) => {
   const [showAll, setShowAll] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [showSkeleton, setShowSkeleton] = useState(true)
 
   const selfPost = auth.user?.id === post.authorId
   const canDeletePost = selfPost || auth.canModerate
@@ -43,6 +44,14 @@ const PostCard = observer(({ post }: { post: Post }) => {
     }
   }, [showAll, post.id, posts])
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSkeleton(false)
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [])
+
   const onAddComment = async () => {
     if (!commentText.trim()) return
     try {
@@ -58,14 +67,30 @@ const PostCard = observer(({ post }: { post: Post }) => {
   const preview = posts.commentsPreview(post.id)
   const count = posts.commentsCount(post.id)
 
-
   return (
     <Card>
       <CardHeader
-        avatar={<Avatar src={post.authorAvatarUrl || DEFAULT_AVATAR} alt={post.authorName} />}
-        title={<Typography variant="subtitle1">{post.authorName}</Typography>}
-        subheader={fmt(post.createdAt)}
-        action={canDeletePost && (
+        avatar={showSkeleton ? (
+          <Skeleton variant="circular" width={40} height={40} />
+        ) : (
+          <Avatar
+            src={post.authorAvatarUrl || DEFAULT_AVATAR}
+            alt={post.authorName}
+          />
+        )}
+        title={showSkeleton ? (
+          <Skeleton variant="text" width="60%" />
+        ) : (
+          <Typography variant="subtitle1">{post.authorName}</Typography>
+        )}
+        subheader={showSkeleton ? (
+          <Skeleton variant="text" width="40%" />
+        ) : (
+          <Typography variant="caption" color="text.secondary">
+            {fmt(post.createdAt)}
+          </Typography>
+        )}
+        action={canDeletePost && !showSkeleton && (
           <Tooltip title={selfPost ? 'Удалить мой пост' : 'Удалить пост'}>
             <span>
               <IconButton
@@ -83,21 +108,28 @@ const PostCard = observer(({ post }: { post: Post }) => {
         )}
       />
       <CardContent>
-        {post.imageUrl && (
+        {showSkeleton ? (
+          post.imageUrl ? (
+            <Skeleton variant="rectangular" width="100%" height={200} sx={{ mb: 2 }} />
+          ) : null
+        ) : post.imageUrl ? (
           <img
             src={post.imageUrl}
-            alt=""
+            alt="post"
             style={{ maxWidth: '100%', borderRadius: 12, marginBottom: 12 }}
           />
+        ) : null}
+        
+        {showSkeleton ? (
+          <Skeleton variant="text" width="80%" />
+        ) : (
+          post.description && <Typography>{post.description}</Typography>
         )}
-        <Typography>{post.description}</Typography>
 
-        {!showAll && preview.length > 0 && (
+        {!showAll && preview.length > 0 && !showSkeleton && (
           <Box mt={2}>
             <Divider sx={{ mb: 1.5 }} />
             {preview.map(c => {
-              const selfComment = auth.user?.id === c.userId
-              const canDeleteComment = selfComment || auth.canModerate
               return (
                 <Box key={c.id} sx={{ mb: 1.25 }}>
                   <Stack direction="row" spacing={1} alignItems="flex-start">
@@ -108,28 +140,12 @@ const PostCard = observer(({ post }: { post: Post }) => {
                     />
                     <Box sx={{ flex: 1 }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography variant="subtitle2">
-                          {c.authorName} ·{' '}
-                          <span style={{ fontWeight: 400, opacity: 0.8 }}>{fmt(c.createdAt)}</span>
+                        <Typography variant="subtitle2">{c.authorName}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {fmt(c.createdAt)}
                         </Typography>
-                        {canDeleteComment && (
-                          <Tooltip title={selfComment ? 'Удалить мой комментарий' : 'Удалить комментарий'}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                color="error"
-                                disabled={posts.isCommentProcessing(c.id)}
-                                onClick={() => {
-                                  posts.hardDeleteComment(post.id, c.id)
-                                }}
-                              >
-                                <DeleteForeverIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
                       </Stack>
-                      <Typography>{c.text}</Typography>
+                      <Typography variant="body2">{c.text}</Typography>
                     </Box>
                   </Stack>
                 </Box>
@@ -138,19 +154,18 @@ const PostCard = observer(({ post }: { post: Post }) => {
           </Box>
         )}
 
-        <Stack direction="row" spacing={1} mt={1} alignItems="center">
-          <Button size="small" onClick={() => setShowAll(s => !s)}>
-            {showAll ? 'Скрыть комментарии' : `Комментарии (${count})`}
-          </Button>
-        </Stack>
+        {!showSkeleton && (
+          <Stack direction="row" spacing={1} mt={1} alignItems="center">
+            <Button size="small" onClick={() => setShowAll(s => !s)}>
+              {showAll ? 'Скрыть комментарии' : `Комментарии (${count})`}
+            </Button>
+          </Stack>
+        )}
 
-        {showAll && (
+        {showAll && !showSkeleton && (
           <Box mt={2}>
             <Divider sx={{ mb: 1.5 }} />
             {all.map(c => {
-              console.log('Rendering all comments for post id:', post.id)
-              const selfComment = auth.user?.id === c.userId
-              const canDeleteComment = selfComment || auth.canModerate
               return (
                 <Box key={c.id} sx={{ mb: 1.25 }}>
                   <Stack direction="row" spacing={1} alignItems="flex-start">
@@ -161,50 +176,39 @@ const PostCard = observer(({ post }: { post: Post }) => {
                     />
                     <Box sx={{ flex: 1 }}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography variant="subtitle2">
-                          {c.authorName} ·{' '}
-                          <span style={{ fontWeight: 400, opacity: 0.8 }}>{fmt(c.createdAt)}</span>
+                        <Typography variant="subtitle2">{c.authorName}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {fmt(c.createdAt)}
                         </Typography>
-                        {canDeleteComment && (
-                          <Tooltip title={selfComment ? 'Удалить мой комментарий' : 'Удалить комментарий'}>
-                            <span>
-                              <IconButton
-                                size="small"
-                                color="error"
-                                disabled={posts.isCommentProcessing(c.id)}
-                                onClick={() => {
-                                  console.log('Deleting comment with id:', c.id)
-                                  posts.hardDeleteComment(post.id, c.id)
-                                }}
-                              >
-                                <DeleteForeverIcon fontSize="small" />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
                       </Stack>
-                      <Typography>{c.text}</Typography>
+                      <Typography variant="body2">{c.text}</Typography>
                     </Box>
                   </Stack>
                 </Box>
               )
             })}
-            {auth.isAuthenticated && !auth.user?.isBlocked && (
-              <Stack direction="row" spacing={1} mt={2}>
-                <TextField
-                  size="small"
-                  placeholder="Написать комментарий..."
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  fullWidth
-                />
-                <Button variant="contained" onClick={onAddComment} disabled={!commentText.trim()}>
-                  Отправить
-                </Button>
-              </Stack>
+            
+            {auth.isAuthenticated && (
+              <Box mt={2}>
+                <Stack direction="row" spacing={1}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    placeholder="Добавить комментарий..."
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={onAddComment}
+                    disabled={!commentText.trim()}
+                  >
+                    Отправить
+                  </Button>
+                </Stack>
+                {err && <Alert severity="error" sx={{ mt: 1 }}>{err}</Alert>}
+              </Box>
             )}
-
-            {err && <Alert severity="error" sx={{ mt: 1 }}>{err}</Alert>}
           </Box>
         )}
       </CardContent>

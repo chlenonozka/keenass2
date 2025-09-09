@@ -1,13 +1,19 @@
-import './loader.css'
+import { LoaderContainer, Spinner } from "./Loader.styles";
 
 type Props = { inline?: boolean; full?: boolean }
 
 export default function Loader({ inline, full }: Props) {
-  if (inline) return <span className="spinner inline" aria-label="Загрузка" />
-  if (full) return (
-    <div className="loader-full">
-      <span className="spinner" />
-    </div>
+  if (inline) {
+    return (
+      <Spinner inline={inline} aria-label="Загрузка" />
+    )
+  }
+  
+  return (
+    <LoaderContainer full={full}>
+      <Spinner inline={inline} />
+      {/* Вы можете добавить сюда текст, если хотите */}
+      {/* <LoaderText>Загрузка...</LoaderText> */}
+    </LoaderContainer>
   )
-  return <div className="loader"><span className="spinner" /></div>
 }

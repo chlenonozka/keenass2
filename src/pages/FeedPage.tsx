@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { observer } from 'mobx-react-lite'
 import { useRootStore } from '../stores/root.store'
 import { Alert, Paper, Stack, Typography } from '@mui/material'
-import Loader from '../components/loader/Loader'
 import PostForm from '../components/post/PostForm'
 import PostCard from '../components/post/PostCard'
 
@@ -21,7 +20,9 @@ const FeedPage = observer(() => {
       </Paper>
 
       {posts.isLoadingPosts ? (
-        <Loader />
+        <Paper sx={{ p: 2 }}>
+          <Typography color="text.secondary">Загрузка постов...</Typography>
+        </Paper>
       ) : posts.errorPosts ? (
         <Alert severity="error">{posts.errorPosts}</Alert>
       ) : (
